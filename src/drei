@@ -1,0 +1,91 @@
+
+package nutritukoy;
+
+/**
+ * Represents the screening result for ONE child.
+ *
+ * These classifications are intended for preliminary nutrition
+ * screening and monitoring purposes only. They are NOT medical
+ * diagnoses and should not replace professional assessment.
+ */
+public enum NutritionStatus {
+
+    NORMAL(0, "Normal"),
+    AT_RISK(1, "At risk - monitor"),
+    NEEDS_FOLLOW_UP(2, "Needs follow-up"),
+    URGENT_REFERRAL(3, "Urgent - refer to RHU");
+
+    private final int severity;
+    private final String label;
+
+    /**
+     * Constructor for each nutrition screening status.
+     */
+    NutritionStatus(int severity, String label) {
+        this.severity = severity;
+        this.label = label;
+    }
+
+    /**
+     * Returns the severity level of the screening result.
+     */
+    public int getSeverity() {
+        return severity;
+    }
+
+    /**
+     * Returns the readable label of the screening status.
+     */
+    public String getLabel() {
+        return label;
+    }
+
+    /**
+     * Checks whether the child requires additional monitoring.
+     */
+    public boolean requiresMonitoring() {
+        return this == AT_RISK;
+    }
+
+    /**
+     * Checks whether the child needs further assessment.
+     */
+    public boolean needsFollowUp() {
+        return this == NEEDS_FOLLOW_UP;
+    }
+
+    /**
+     * Checks whether the child needs urgent referral.
+     */
+    public boolean requiresUrgentReferral() {
+        return this == URGENT_REFERRAL;
+    }
+
+    /**
+     * Checks whether the status requires professional attention.
+     */
+    public boolean requiresAttention() {
+        return severity >= 2;
+    }
+
+    /**
+     * Returns the status with the highest severity between two results.
+     */
+    public static NutritionStatus getHigherSeverity(
+            NutritionStatus first,
+            NutritionStatus second) {
+
+        if (first == null) return second;
+        if (second == null) return first;
+
+        return first.severity >= second.severity ? first : second;
+    }
+
+    /**
+     * Returns the readable label when the enum is printed.
+     */
+    @Override
+    public String toString() {
+        return label;
+    }
+}
