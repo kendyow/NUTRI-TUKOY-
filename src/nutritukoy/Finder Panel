@@ -1,0 +1,363 @@
+package gui;
+
+import java.awt.BorderLayout;
+import java.awt.Component;
+import java.awt.Desktop;
+import java.awt.Dimension;
+import java.awt.FlowLayout;
+import java.awt.Font;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
+import java.awt.GridLayout;
+import java.awt.Insets;
+import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+
+import javax.swing.BorderFactory;
+import javax.swing.DefaultListCellRenderer;
+import javax.swing.DefaultListModel;
+import javax.swing.JButton;
+import javax.swing.JComboBox;
+import javax.swing.JLabel;
+import javax.swing.JList;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JSpinner;
+import javax.swing.ListSelectionModel;
+import javax.swing.SpinnerNumberModel;
+import javax.swing.border.EmptyBorder;
+
+import exception.DataStorageException;
+import model.BloodType;
+import model.Hospital;
+import model.Location;
+import service.DataStore;
+import service.HospitalFinder;
+import service.PlaceCatalog;
+import service.Registry;
+
+/** The public screen: pick a blood type, set where you are, and see the nearest hospitals on the map. */
+public class FinderPanel extends JPanel {
+    private final Registry registry;
+    private final DataStore store;
+    private final HospitalFinder finder = new HospitalFinder();
+    private final MapPanel map = new MapPanel();
+
+    private final JComboBox<BloodType> typeBox = new JComboBox<>(BloodType.values());
+    private final JSpinner unitsSpinner = new JSpinner(new SpinnerNumberModel(1, 1, 10, 1));
+    private final JComboBox<Location> placeBox =
+            new JComboBox<>(PlaceCatalog.getAll().toArray(new Location[0]));
+    private final JLabel hereLabel = new JLabel(" ");
+    private final JButton searchButton = new JButton("Search nearest hospitals");
+    private final DefaultListModel<Hospital> listModel = new DefaultListModel<>();
+    private final JList<Hospital> resultList = new JList<>(listModel);
+    private final JLabel detailLabel = new JLabel(" ");
+    private final JButton viewButton = new JButton("View on OpenStreetMap");
+    private final JButton routeButton = new JButton("Road directions (OpenStreetMap)");
+    private final JLabel statusLabel = new JLabel(" ");
+
+    private Location here;            // where the user is right now (changes when the map is clicked)
+    private Location searchOrigin;    // where the user was when the last search ran
+    private BloodType searchedType;   // what the last search was for
+
+    public FinderPanel(Registry registry, DataStore store) {
+        this.registry = registry;
+        this.store = store;
+        setLayout(new BorderLayout());
+
+        map.setHospitals(registry.getHospitals());
+        map.setLocationListener((lat, lon) -> pickFromMap(lat, lon));
+        add(buildMapArea(), BorderLayout.CENTER);
+        add(buildSidePanel(), BorderLayout.EAST);
+
+        typeBox.setSelectedItem(BloodType.B_NEG);
+        setHere(PlaceCatalog.getAll().get(0));
+        showSelected(null);
+    }
+
+    /** Called when this tab is shown again, so the pins use the latest stock. */
+    public void refresh() {
+        map.setHospitals(registry.getHospitals());
+    }
+
+    // =====================================================================
+    //  Building the screen
+    // =====================================================================
+    /** The map with a small row of zoom buttons above it. */
+    private JPanel buildMapArea() {
+        JButton zoomIn = new JButton("+");
+        JButton zoomOut = new JButton("−");
+        JButton reset = new JButton("Show whole country");
+        zoomIn.setToolTipText("Zoom in");
+        zoomOut.setToolTipText("Zoom out");
+        zoomIn.addActionListener(e -> map.zoomIn());
+        zoomOut.addActionListener(e -> map.zoomOut());
+        reset.addActionListener(e -> map.resetView());
+
+        JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
+        bar.add(zoomIn);
+        bar.add(zoomOut);
+        bar.add(reset);
+
+        JPanel area = new JPanel(new BorderLayout());
+        area.add(bar, BorderLayout.NORTH);
+        area.add(map, BorderLayout.CENTER);
+        return area;
+    }
+
+    private JPanel buildSidePanel() {
+        JPanel side = new JPanel(new BorderLayout(0, 8));
+        side.setBorder(new EmptyBorder(10, 10, 10, 10));
+        side.setPreferredSize(new Dimension(350, 600));
+
+        JLabel title = new JLabel("Find blood nearby");
+        title.setFont(title.getFont().deriveFont(Font.BOLD, 18f));
+        JLabel tip = new JLabel("<html><i>Tip: click anywhere on the map to set your location.</i></html>");
+
+        JPanel form = new JPanel(new GridBagLayout());
+        addWide(form, 0, title);
+        addRow(form, 1, "Blood type needed:", typeBox);
+        addRow(form, 2, "Units needed:", unitsSpinner);
+        addRow(form, 3, "Start from:", placeBox);
+        addWide(form, 4, hereLabel);
+        addWide(form, 5, tip);
+        addWide(form, 6, searchButton);
+        side.add(form, BorderLayout.NORTH);
+
+        resultList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        resultList.setCellRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(JList<?> list, Object value,
+                    int index, boolean isSelected, boolean cellHasFocus) {
+                super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+                if (value instanceof Hospital && searchOrigin != null) {
+                    Hospital h = (Hospital) value;
+                    double km = h.getLocation().distanceKmTo(searchOrigin);
+                    setText(String.format("%d. %s  |  %.1f km  |  %d units",
+                            index + 1, h.getName(), km, h.getCompatibleUnits(searchedType)));
+                }
+                return this;
+            }
+        });
+        JScrollPane scroll = new JScrollPane(resultList);
+        scroll.setBorder(BorderFactory.createTitledBorder("Hospitals that can supply (nearest first)"));
+        side.add(scroll, BorderLayout.CENTER);
+
+        JPanel buttons = new JPanel(new GridLayout(2, 1, 0, 6));
+        buttons.add(viewButton);
+        buttons.add(routeButton);
+        JPanel bottom = new JPanel(new BorderLayout(0, 8));
+        bottom.add(detailLabel, BorderLayout.NORTH);
+        bottom.add(buttons, BorderLayout.CENTER);
+        bottom.add(statusLabel, BorderLayout.SOUTH);
+        side.add(bottom, BorderLayout.SOUTH);
+
+        // ----- what happens when the user does something -----
+        placeBox.setRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(JList<?> list, Object value,
+                    int index, boolean isSelected, boolean cellHasFocus) {
+                super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+                if (value instanceof Location) {
+                    setText(((Location) value).getName());
+                }
+                return this;
+            }
+        });
+        placeBox.addActionListener(e -> {
+            Location chosen = (Location) placeBox.getSelectedItem();
+            if (chosen != null) {
+                setHere(chosen);
+            }
+        });
+        searchButton.addActionListener(e -> search());
+        resultList.addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) {
+                showSelected(resultList.getSelectedValue());
+            }
+        });
+        viewButton.addActionListener(e -> openHospitalOnMap());
+        routeButton.addActionListener(e -> openRoute());
+        return side;
+    }
+
+    private void addRow(JPanel form, int row, String labelText, Component field) {
+        GridBagConstraints lc = new GridBagConstraints();
+        lc.gridx = 0;
+        lc.gridy = row;
+        lc.anchor = GridBagConstraints.WEST;
+        lc.insets = new Insets(4, 2, 4, 8);
+        form.add(new JLabel(labelText), lc);
+
+        GridBagConstraints fc = new GridBagConstraints();
+        fc.gridx = 1;
+        fc.gridy = row;
+        fc.weightx = 1.0;
+        fc.fill = GridBagConstraints.HORIZONTAL;
+        fc.insets = new Insets(4, 0, 4, 2);
+        form.add(field, fc);
+    }
+
+    private void addWide(JPanel form, int row, Component component) {
+        GridBagConstraints c = new GridBagConstraints();
+        c.gridx = 0;
+        c.gridy = row;
+        c.gridwidth = 2;
+        c.weightx = 1.0;
+        c.fill = GridBagConstraints.HORIZONTAL;
+        c.insets = new Insets(4, 2, 4, 2);
+        form.add(component, c);
+    }
+
+    // =====================================================================
+    //  Actions
+    // =====================================================================
+    private void setHere(Location location) {
+        here = location;
+        map.setUserLocation(location);
+        hereLabel.setText(String.format(Locale.US, "<html>Your location: %s (%.4f, %.4f)</html>",
+                location.getName(), location.getLatitude(), location.getLongitude()));
+
+        // Old results were measured from the old location, so they would now be misleading
+        if (searchOrigin != null) {
+            clearResults();
+            setStatus("Location changed. Press Search to update the results.");
+        }
+    }
+
+    private void clearResults() {
+        listModel.clear();
+        searchOrigin = null;
+        searchedType = null;
+        map.setSearch(null, 0, new ArrayList<>());
+        showSelected(null);
+    }
+
+    private void pickFromMap(double lat, double lon) {
+        try {
+            // Rounded to 4 decimals (about 10 meters), which is plenty for this app
+            double roundedLat = Math.round(lat * 10000) / 10000.0;
+            double roundedLon = Math.round(lon * 10000) / 10000.0;
+            Location pin = new Location("Map pin", roundedLat, roundedLon);
+            boolean hadResults = searchOrigin != null;
+            placeBox.setSelectedIndex(-1);          // the drop-down no longer matches the location
+            setHere(pin);                           // this also clears old results and says so
+            if (!hadResults) {
+                setStatus("Location set from the map.");
+            }
+        } catch (IllegalArgumentException ex) {
+            setStatus(ex.getMessage());
+        }
+    }
+
+    private void search() {
+        BloodType type = (BloodType) typeBox.getSelectedItem();
+        int units = (Integer) unitsSpinner.getValue();
+        try {
+            List<Hospital> found = finder.findNearestWithStock(
+                    registry.getHospitals(), type, units, here);
+
+            searchOrigin = here;
+            searchedType = type;
+            listModel.clear();
+            for (Hospital h : found) {
+                listModel.addElement(h);
+            }
+            map.setSearch(type, units, found);
+
+            // Zoom the map so "You" and the nearest hospitals are all visible
+            List<Location> toShow = new ArrayList<>();
+            toShow.add(here);
+            for (int i = 0; i < Math.min(3, found.size()); i++) {
+                toShow.add(found.get(i).getLocation());
+            }
+            map.fitTo(toShow);
+
+            registry.getAuditLog().record("Public", "Searched " + type + " near " + here.getName());
+            autosave();
+
+            if (found.isEmpty()) {
+                showSelected(null);
+                setStatus("No hospital in the system can supply " + units
+                        + " unit(s) for " + type + " right now.");
+            } else {
+                resultList.setSelectedIndex(0);
+                setStatus(found.size() + " hospital(s) can supply " + units
+                        + " unit(s) for " + type + ".");
+            }
+        } catch (IllegalArgumentException ex) {
+            setStatus(ex.getMessage());
+        }
+    }
+
+    private void showSelected(Hospital h) {
+        map.setSelected(h);
+        boolean hasSelection = h != null;
+        viewButton.setEnabled(hasSelection);
+        routeButton.setEnabled(hasSelection);
+        if (!hasSelection) {
+            detailLabel.setText(" ");
+            return;
+        }
+        double km = h.getLocation().distanceKmTo(searchOrigin);
+        detailLabel.setText("<html><b>" + h.getName() + "</b><br>"
+                + h.getLocation().getName() + "<br>"
+                + "Straight-line distance: " + String.format("%.1f", km) + " km<br>"
+                + "Units usable for " + searchedType + ": " + h.getCompatibleUnits(searchedType) + "<br>"
+                + "Exact " + searchedType + " in stock: " + h.getUnits(searchedType)
+                + "</html>");
+    }
+
+    private void autosave() {
+        try {
+            store.save(registry);
+        } catch (DataStorageException e) {
+            setStatus("Could not save: " + e.getMessage());
+        }
+    }
+
+    private void setStatus(String text) {
+        statusLabel.setText("<html><body style='width:290px'>" + text + "</body></html>");
+    }
+
+    // =====================================================================
+    //  Opening OpenStreetMap in the browser (no library needed)
+    // =====================================================================
+    private void openHospitalOnMap() {
+        Hospital h = resultList.getSelectedValue();
+        if (h == null) {
+            return;
+        }
+        double lat = h.getLocation().getLatitude();
+        double lon = h.getLocation().getLongitude();
+        openInBrowser(String.format(Locale.US,
+                "https://www.openstreetmap.org/?mlat=%f&mlon=%f#map=15/%f/%f", lat, lon, lat, lon));
+    }
+
+    private void openRoute() {
+        Hospital h = resultList.getSelectedValue();
+        if (h == null || searchOrigin == null) {
+            return;
+        }
+        openInBrowser(String.format(Locale.US,
+                "https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=%f,%f;%f,%f",
+                searchOrigin.getLatitude(), searchOrigin.getLongitude(),
+                h.getLocation().getLatitude(), h.getLocation().getLongitude()));
+    }
+
+    private void openInBrowser(String url) {
+        try {
+            if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+                Desktop.getDesktop().browse(new URI(url));
+            } else {
+                setStatus("This computer cannot open a browser from Java. Link: " + url);
+            }
+        } catch (IOException | URISyntaxException ex) {
+            setStatus("Could not open the browser: " + ex.getMessage());
+        }
+    }
+}
