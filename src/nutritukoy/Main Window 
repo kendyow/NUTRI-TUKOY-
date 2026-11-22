@@ -1,0 +1,46 @@
+package gui;
+
+import java.awt.BorderLayout;
+import java.awt.Dimension;
+import java.awt.Toolkit;
+
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+import javax.swing.JTabbedPane;
+import javax.swing.border.EmptyBorder;
+
+import service.DataStore;
+import service.Registry;
+
+/** The main window: two tabs, one for the map search and one for the stock board. */
+public class MainWindow extends JFrame {
+
+    public MainWindow(Registry registry, DataStore store) {
+        super("DUGTONG-BUHAY - Rare Blood Donor Matching and Emergency Response Network");
+        setDefaultCloseOperation(EXIT_ON_CLOSE);
+
+        FinderPanel finderPanel = new FinderPanel(registry, store);
+        StockPanel stockPanel = new StockPanel(registry);
+
+        JTabbedPane tabs = new JTabbedPane();
+        tabs.addTab("Find Blood Nearby", finderPanel);
+        tabs.addTab("Hospital Stock Board", stockPanel);
+        tabs.addChangeListener(e -> {
+            stockPanel.refresh();
+            finderPanel.refresh();
+        });
+
+        JLabel footer = new JLabel("Privacy: this public view shows hospitals only. "
+                + "No donor information is displayed.");
+        footer.setBorder(new EmptyBorder(4, 10, 6, 10));
+
+        setLayout(new BorderLayout());
+        add(tabs, BorderLayout.CENTER);
+        add(footer, BorderLayout.SOUTH);
+
+        // Fit small laptop screens (for example 1366 x 768) as well as large ones
+        Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
+        setSize(Math.min(1100, screen.width - 40), Math.min(760, screen.height - 80));
+        setLocationRelativeTo(null);
+    }
+}
