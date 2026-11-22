@@ -1,0 +1,550 @@
+package gui;
+
+import java.awt.BasicStroke;
+import java.awt.Color;
+import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.FontMetrics;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.Point;
+import java.awt.RenderingHints;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseWheelEvent;
+import java.awt.geom.Path2D;
+import java.util.ArrayList;
+import java.util.List;
+
+import javax.swing.JPanel;
+import javax.swing.ToolTipManager;
+
+import model.BloodType;
+import model.Hospital;
+import model.Location;
+import service.PlaceCatalog;
+
+public class MapPanel extends JPanel {
+
+    /** Called when the user clicks on the map. */
+    public interface LocationListener {
+        void onLocationPicked(double latitude, double longitude);
+    }
+
+    // The part of the Earth shown by the map (covers the whole Philippines)
+    private static final double LON_MIN = 116.0;
+    private static final double LON_MAX = 127.0;
+    private static final double LAT_MIN = 4.5;
+    private static final double LAT_MAX = 21.5;
+
+    private static final int PIN_RADIUS = 9;
+
+    private static final Color SEA = new Color(214, 234, 248);
+    private static final Color LAND = new Color(240, 233, 211);
+    private static final Color COAST = new Color(150, 140, 110);
+    private static final Color GREEN = new Color(46, 160, 67);
+    private static final Color ORANGE = new Color(240, 140, 0);
+    private static final Color GRAY = new Color(150, 150, 150);
+    private static final Color NEUTRAL = new Color(110, 90, 160);
+    private static final Color BLUE = new Color(30, 90, 200);
+
+    // Simplified island outlines. Each point is {longitude, latitude}.
+    private static final double[][] LUZON = {
+        {120.60, 18.50}, {121.20, 18.60}, {122.00, 18.50}, {122.35, 18.60},
+        {122.45, 17.40}, {122.25, 16.30}, {121.65, 15.80}, {121.50, 15.30},
+        {121.70, 14.70}, {121.75, 14.20}, {121.95, 14.00}, {122.35, 14.10},
+        {122.95, 14.15}, {123.40, 14.05}, {123.90, 13.85}, {123.95, 13.20},
+        {124.10, 12.60}, {123.70, 12.70}, {123.25, 13.10}, {122.75, 13.50},
+        {122.25, 13.80}, {121.60, 13.90}, {121.05, 13.72}, {120.70, 13.90},
+        {120.60, 14.10}, {120.90, 14.40}, {120.97, 14.65}, {120.75, 14.85},
+        {120.55, 14.65}, {120.50, 14.43}, {120.30, 14.75}, {119.95, 15.35},
+        {119.90, 15.80}, {119.90, 16.40}, {120.35, 16.05}, {120.35, 16.60},
+        {120.35, 17.50}, {120.45, 18.20}
+    };
+    private static final double[][] MINDORO = {
+        {120.80, 13.50}, {121.40, 13.40}, {121.50, 12.80}, {121.40, 12.30},
+        {121.00, 12.20}, {120.70, 12.50}, {120.40, 13.00}, {120.35, 13.40}
+    };
+    private static final double[][] PALAWAN = {
+        {120.30, 12.00}, {119.80, 11.50}, {119.20, 10.70}, {118.70, 10.00},
+        {118.20, 9.40}, {117.60, 8.80}, {117.10, 8.40}, {117.40, 8.30},
+        {118.00, 8.80}, {118.60, 9.40}, {119.20, 10.30}, {119.80, 11.00},
+        {120.20, 11.60}
+    };
+    private static final double[][] MASBATE = {
+        {123.10, 12.50}, {123.75, 12.40}, {123.65, 11.90}, {123.20, 11.85},
+        {123.00, 12.15}
+    };
+    private static final double[][] CATANDUANES = {
+        {124.10, 14.10}, {124.45, 13.90}, {124.35, 13.55}, {124.05, 13.60}
+    };
+    private static final double[][] SAMAR = {
+        {124.30, 12.40}, {124.90, 12.55}, {125.40, 12.20}, {125.80, 11.60},
+        {125.75, 11.00}, {125.30, 11.20}, {125.00, 11.70}, {124.60, 11.80},
+        {124.30, 12.00}
+    };
+    private static final double[][] LEYTE = {
+        {124.35, 11.55}, {124.95, 11.25}, {125.20, 10.70}, {125.10, 10.00},
+        {124.80, 10.10}, {124.50, 10.70}, {124.30, 11.10}
+    };
+    private static final double[][] PANAY = {
+        {121.90, 11.90}, {122.60, 11.70}, {123.10, 11.50}, {123.10, 11.00},
+        {122.60, 10.60}, {122.10, 10.50}, {121.90, 10.90}
+    };
+    private static final double[][] NEGROS = {
+        {123.15, 11.00}, {123.50, 10.90}, {123.30, 10.40}, {123.20, 10.00},
+        {123.10, 9.60}, {123.25, 9.30}, {123.00, 9.05}, {122.70, 9.35},
+        {122.40, 9.70}, {122.75, 10.15}, {122.90, 10.70}
+    };
+    private static final double[][] CEBU = {
+        {124.00, 11.30}, {124.10, 10.80}, {123.95, 10.30}, {123.65, 9.70},
+        {123.40, 9.45}, {123.30, 9.80}, {123.55, 10.40}, {123.75, 10.95}
+    };
+    private static final double[][] BOHOL = {
+        {123.90, 9.95}, {124.25, 10.20}, {124.65, 10.05}, {124.55, 9.70},
+        {124.15, 9.60}, {123.85, 9.75}
+    };
+    private static final double[][] MINDANAO = {
+        {123.40, 8.65}, {124.00, 8.60}, {124.65, 8.50}, {125.20, 8.95},
+        {125.50, 9.40}, {125.60, 9.80}, {126.10, 9.30}, {126.30, 8.50},
+        {126.55, 7.60}, {126.30, 6.60}, {125.90, 6.00}, {125.30, 5.80},
+        {124.60, 6.00}, {124.05, 6.50}, {124.30, 7.15}, {123.70, 7.50},
+        {123.00, 7.20}, {122.10, 6.95}, {122.20, 7.60}, {122.90, 8.10}
+    };
+    private static final double[][][] ISLANDS = {
+        LUZON, MINDORO, PALAWAN, MASBATE, CATANDUANES, SAMAR,
+        LEYTE, PANAY, NEGROS, CEBU, BOHOL, MINDANAO
+    };
+
+    // What the map is currently showing
+    private final List<Hospital> hospitals = new ArrayList<>();
+    private List<Hospital> results = new ArrayList<>();
+    private BloodType needed;
+    private int units;
+    private Location userLocation;
+    private Hospital selected;
+    private LocationListener listener;
+
+    // The current view of the map (changed by zooming and dragging)
+    private static final double MAX_ZOOM = 40.0;
+    private double centerLon = (LON_MIN + LON_MAX) / 2.0;
+    private double centerLat = (LAT_MIN + LAT_MAX) / 2.0;
+    private double zoom = 1.0;
+
+    public MapPanel() {
+        setBackground(SEA);
+        setPreferredSize(new Dimension(600, 800));
+        ToolTipManager.sharedInstance().registerComponent(this);
+
+        // One handler for clicking, dragging, hovering, and the scroll wheel
+        MouseAdapter mouse = new MouseAdapter() {
+            private Point pressPoint;
+            private double pressLon;
+            private double pressLat;
+            private boolean dragged;
+
+            @Override
+            public void mousePressed(MouseEvent e) {
+                pressPoint = e.getPoint();
+                pressLon = centerLon;
+                pressLat = centerLat;
+                dragged = false;
+            }
+
+            @Override
+            public void mouseDragged(MouseEvent e) {
+                if (pressPoint == null || scale() <= 0) {
+                    return;
+                }
+                int dx = e.getX() - pressPoint.x;
+                int dy = e.getY() - pressPoint.y;
+                if (Math.abs(dx) + Math.abs(dy) > 4) {
+                    dragged = true;
+                }
+                if (dragged) {
+                    centerLon = pressLon - dx / scale();
+                    centerLat = pressLat + dy / scale();
+                    repaint();
+                }
+            }
+
+            @Override
+            public void mouseReleased(MouseEvent e) {
+                // A press and release without dragging counts as a click
+                if (!dragged && listener != null && scale() > 0) {
+                    double lon = xToLon(e.getX());
+                    double lat = yToLat(e.getY());
+                    boolean inside = lon >= LON_MIN && lon <= LON_MAX
+                            && lat >= LAT_MIN && lat <= LAT_MAX;
+                    if (inside) {
+                        listener.onLocationPicked(lat, lon);
+                    }
+                }
+            }
+
+            @Override
+            public void mouseMoved(MouseEvent e) {
+                Hospital h = hospitalAt(e.getX(), e.getY());
+                setToolTipText(h == null ? null
+                        : h.getName() + " (" + h.getLocation().getName() + ")");
+            }
+
+            @Override
+            public void mouseWheelMoved(MouseWheelEvent e) {
+                zoomAt(e.getX(), e.getY(), Math.pow(1.25, -e.getPreciseWheelRotation()));
+            }
+        };
+        addMouseListener(mouse);
+        addMouseMotionListener(mouse);
+        addMouseWheelListener(mouse);
+    }
+
+    // =====================================================================
+    //  Zooming
+    // =====================================================================
+    /** Zooms by the given factor while keeping the point under (x, y) in place. */
+    private void zoomAt(int x, int y, double factor) {
+        if (scale() <= 0) {
+            return;
+        }
+        double lonAtMouse = xToLon(x);
+        double latAtMouse = yToLat(y);
+        zoom = Math.max(1.0, Math.min(MAX_ZOOM, zoom * factor));
+        centerLon = lonAtMouse - (x - getWidth() / 2.0) / scale();
+        centerLat = latAtMouse + (y - getHeight() / 2.0) / scale();
+        repaint();
+    }
+
+    public void zoomIn() {
+        zoomAt(getWidth() / 2, getHeight() / 2, 1.6);
+    }
+
+    public void zoomOut() {
+        zoomAt(getWidth() / 2, getHeight() / 2, 1 / 1.6);
+    }
+
+    /** Shows the whole country again. */
+    public void resetView() {
+        zoom = 1.0;
+        centerLon = (LON_MIN + LON_MAX) / 2.0;
+        centerLat = (LAT_MIN + LAT_MAX) / 2.0;
+        repaint();
+    }
+
+    /** Zooms and moves the map so that all the given places are visible. */
+    public void fitTo(List<Location> places) {
+        if (places.isEmpty() || getWidth() <= 0 || getHeight() <= 0) {
+            resetView();
+            return;
+        }
+        double minLon = Double.MAX_VALUE;
+        double maxLon = -Double.MAX_VALUE;
+        double minLat = Double.MAX_VALUE;
+        double maxLat = -Double.MAX_VALUE;
+        for (Location p : places) {
+            minLon = Math.min(minLon, p.getLongitude());
+            maxLon = Math.max(maxLon, p.getLongitude());
+            minLat = Math.min(minLat, p.getLatitude());
+            maxLat = Math.max(maxLat, p.getLatitude());
+        }
+        double spanLon = Math.max(maxLon - minLon, 0.4);      // never zoom in absurdly far
+        double spanLat = Math.max(maxLat - minLat, 0.4);
+        double scaleNeeded = Math.min(getWidth() * 0.7 / spanLon, getHeight() * 0.7 / spanLat);
+        zoom = Math.max(1.0, Math.min(MAX_ZOOM, scaleNeeded / baseScale()));
+        centerLon = (minLon + maxLon) / 2.0;
+        centerLat = (minLat + maxLat) / 2.0;
+        repaint();
+    }
+
+    // =====================================================================
+    //  Methods the rest of the program uses to control the map
+    // =====================================================================
+    public void setLocationListener(LocationListener listener) {
+        this.listener = listener;
+    }
+
+    public void setHospitals(List<Hospital> newHospitals) {
+        hospitals.clear();
+        hospitals.addAll(newHospitals);
+        repaint();
+    }
+
+    public void setSearch(BloodType needed, int units, List<Hospital> results) {
+        this.needed = needed;
+        this.units = units;
+        this.results = new ArrayList<>(results);
+        repaint();
+    }
+
+    public void setUserLocation(Location location) {
+        this.userLocation = location;
+        repaint();
+    }
+
+    public void setSelected(Hospital hospital) {
+        this.selected = hospital;
+        repaint();
+    }
+
+    // =====================================================================
+    //  Coordinate conversion: latitude/longitude <-> pixels
+    // =====================================================================
+    /** Pixels per degree when the whole country fits. Same in both directions, so the map is not stretched. */
+    private double baseScale() {
+        return Math.min(getWidth() / (LON_MAX - LON_MIN),
+                        getHeight() / (LAT_MAX - LAT_MIN));
+    }
+
+    /** Pixels per degree right now (zoomed in or out). */
+    private double scale() {
+        return baseScale() * zoom;
+    }
+
+    /** The map center sits in the middle of the panel; everything else is measured from it. */
+    private int lonToX(double lon) {
+        return (int) Math.round(getWidth() / 2.0 + (lon - centerLon) * scale());
+    }
+
+    /** Screen y grows downward, but latitude grows upward, so the subtraction is flipped. */
+    private int latToY(double lat) {
+        return (int) Math.round(getHeight() / 2.0 + (centerLat - lat) * scale());
+    }
+
+    private double xToLon(int x) {
+        return centerLon + (x - getWidth() / 2.0) / scale();
+    }
+
+    private double yToLat(int y) {
+        return centerLat - (y - getHeight() / 2.0) / scale();
+    }
+
+    // =====================================================================
+    //  Drawing
+    // =====================================================================
+    @Override
+    protected void paintComponent(Graphics g) {
+        super.paintComponent(g);
+        Graphics2D g2 = (Graphics2D) g.create();
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+
+        if (scale() > 0) {
+            drawGrid(g2);
+            drawLand(g2);
+            drawCities(g2);
+            drawRoute(g2);
+            drawHospitals(g2);
+            drawUser(g2);
+            drawSelectedLabel(g2);
+            drawHint(g2);
+        }
+        drawLegend(g2);
+        g2.dispose();
+    }
+
+    private void drawGrid(Graphics2D g2) {
+        int w = getWidth();
+        int h = getHeight();
+
+        // Space the grid lines so they never get too crowded or too sparse
+        double step = zoom >= 12 ? 0.25 : zoom >= 6 ? 0.5 : zoom >= 3 ? 1 : 2;
+
+        g2.setStroke(new BasicStroke(1f));
+        g2.setFont(new Font("SansSerif", Font.PLAIN, 10));
+        for (double lon = Math.ceil(xToLon(0) / step) * step; lon <= xToLon(w); lon += step) {
+            int x = lonToX(lon);
+            g2.setColor(new Color(255, 255, 255, 170));
+            g2.drawLine(x, 0, x, h);
+            g2.setColor(new Color(100, 120, 140));
+            g2.drawString(formatDegrees(lon) + "\u00B0E", x + 2, h - 4);
+        }
+        for (double lat = Math.ceil(yToLat(h) / step) * step; lat <= yToLat(0); lat += step) {
+            int y = latToY(lat);
+            g2.setColor(new Color(255, 255, 255, 170));
+            g2.drawLine(0, y, w, y);
+            g2.setColor(new Color(100, 120, 140));
+            g2.drawString(formatDegrees(lat) + "\u00B0N", 3, y - 2);
+        }
+    }
+
+    /** Drawn last, so the land never covers it. */
+    private void drawHint(Graphics2D g2) {
+        String text = "Simplified map. Click to set your location. Scroll to zoom, drag to move.";
+        g2.setFont(new Font("SansSerif", Font.PLAIN, 11));
+        FontMetrics fm = g2.getFontMetrics();
+        g2.setColor(new Color(255, 255, 255, 200));
+        g2.fillRoundRect(6, 6, fm.stringWidth(text) + 12, fm.getHeight() + 4, 8, 8);
+        g2.setColor(new Color(70, 90, 110));
+        g2.drawString(text, 12, 6 + fm.getAscent() + 2);
+    }
+
+    private static String formatDegrees(double value) {
+        return value == Math.rint(value) ? String.valueOf((int) value) : String.valueOf(value);
+    }
+
+    private void drawLand(Graphics2D g2) {
+        for (double[][] island : ISLANDS) {
+            Path2D.Double path = new Path2D.Double();
+            for (int i = 0; i < island.length; i++) {
+                int x = lonToX(island[i][0]);
+                int y = latToY(island[i][1]);
+                if (i == 0) {
+                    path.moveTo(x, y);
+                } else {
+                    path.lineTo(x, y);
+                }
+            }
+            path.closePath();
+            g2.setColor(LAND);
+            g2.fill(path);
+            g2.setColor(COAST);
+            g2.setStroke(new BasicStroke(1.3f));
+            g2.draw(path);
+        }
+    }
+
+    private void drawCities(Graphics2D g2) {
+        g2.setFont(new Font("SansSerif", Font.PLAIN, 10));
+        for (Location place : PlaceCatalog.getAll()) {
+            int x = lonToX(place.getLongitude());
+            int y = latToY(place.getLatitude());
+            g2.setColor(new Color(120, 110, 90));
+            g2.fillOval(x - 2, y - 2, 4, 4);
+
+            // When zoomed out, only name the big cities so the labels do not pile up
+            boolean bigCity = place.getName().equals("Manila")
+                    || place.getName().equals("Cebu City")
+                    || place.getName().equals("Davao City");
+            if (zoom >= 2.5 || bigCity) {
+                g2.setColor(new Color(90, 80, 60));
+                g2.drawString(place.getName(), x + 5, y - 3);
+            }
+        }
+    }
+
+    private void drawRoute(Graphics2D g2) {
+        if (userLocation == null || selected == null) {
+            return;
+        }
+        int x1 = lonToX(userLocation.getLongitude());
+        int y1 = latToY(userLocation.getLatitude());
+        int x2 = lonToX(selected.getLocation().getLongitude());
+        int y2 = latToY(selected.getLocation().getLatitude());
+        g2.setColor(BLUE);
+        g2.setStroke(new BasicStroke(2f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER,
+                10f, new float[] {8f, 6f}, 0f));
+        g2.drawLine(x1, y1, x2, y2);
+    }
+
+    /** Green = enough stock, orange = can supply but stock is low, gray = cannot supply. */
+    private Color pinColor(Hospital h) {
+        if (needed == null) {
+            return NEUTRAL;
+        }
+        if (!h.canSupply(needed, units)) {
+            return GRAY;
+        }
+        return h.getCompatibleUnits(needed) > Hospital.LOW_THRESHOLD ? GREEN : ORANGE;
+    }
+
+    private void drawHospitals(Graphics2D g2) {
+        for (Hospital h : hospitals) {
+            int x = lonToX(h.getLocation().getLongitude());
+            int y = latToY(h.getLocation().getLatitude());
+
+            if (h == selected) {
+                g2.setColor(Color.BLACK);
+                g2.setStroke(new BasicStroke(3f));
+                int ring = PIN_RADIUS + 4;
+                g2.drawOval(x - ring, y - ring, 2 * ring, 2 * ring);
+            }
+
+            g2.setColor(pinColor(h));
+            g2.fillOval(x - PIN_RADIUS, y - PIN_RADIUS, 2 * PIN_RADIUS, 2 * PIN_RADIUS);
+            g2.setColor(Color.WHITE);
+            g2.setStroke(new BasicStroke(2f));
+            g2.drawOval(x - PIN_RADIUS, y - PIN_RADIUS, 2 * PIN_RADIUS, 2 * PIN_RADIUS);
+
+            int rank = results.indexOf(h) + 1;      // 0 means "not in the results"
+            if (rank > 0) {
+                g2.setFont(new Font("SansSerif", Font.BOLD, 11));
+                FontMetrics fm = g2.getFontMetrics();
+                String text = String.valueOf(rank);
+                g2.drawString(text, x - fm.stringWidth(text) / 2,
+                        y + (fm.getAscent() - fm.getDescent()) / 2);
+            }
+        }
+    }
+
+    private void drawUser(Graphics2D g2) {
+        if (userLocation == null) {
+            return;
+        }
+        int x = lonToX(userLocation.getLongitude());
+        int y = latToY(userLocation.getLatitude());
+        g2.setColor(BLUE);
+        g2.fillOval(x - 7, y - 7, 14, 14);
+        g2.setColor(Color.WHITE);
+        g2.setStroke(new BasicStroke(2f));
+        g2.drawOval(x - 7, y - 7, 14, 14);
+        g2.setColor(BLUE);
+        g2.setFont(new Font("SansSerif", Font.BOLD, 11));
+        g2.drawString("You", x + 10, y + 16);
+    }
+
+    private void drawSelectedLabel(Graphics2D g2) {
+        if (selected == null) {
+            return;
+        }
+        int x = lonToX(selected.getLocation().getLongitude());
+        int y = latToY(selected.getLocation().getLatitude());
+        g2.setFont(new Font("SansSerif", Font.BOLD, 12));
+        FontMetrics fm = g2.getFontMetrics();
+        String text = selected.getName();
+        int boxW = fm.stringWidth(text) + 12;
+        int boxH = fm.getHeight() + 4;
+        int boxX = Math.max(4, Math.min(x + 14, getWidth() - boxW - 4));
+        int boxY = Math.max(4, y - 14 - boxH);
+
+        g2.setColor(new Color(255, 255, 255, 235));
+        g2.fillRoundRect(boxX, boxY, boxW, boxH, 8, 8);
+        g2.setColor(Color.DARK_GRAY);
+        g2.setStroke(new BasicStroke(1f));
+        g2.drawRoundRect(boxX, boxY, boxW, boxH, 8, 8);
+        g2.drawString(text, boxX + 6, boxY + fm.getAscent() + 2);
+    }
+
+    private void drawLegend(Graphics2D g2) {
+        String[] labels = {"Enough stock", "Low stock", "Cannot supply", "Your location"};
+        Color[] colors = {GREEN, ORANGE, GRAY, BLUE};
+        int lineHeight = 20;
+        int boxW = 130;
+        int boxH = labels.length * lineHeight + 10;
+        int x = 10;
+        int y = getHeight() - boxH - 24;     // leave room for the longitude labels below
+
+        g2.setColor(new Color(255, 255, 255, 210));
+        g2.fillRoundRect(x, y, boxW, boxH, 10, 10);
+        g2.setFont(new Font("SansSerif", Font.PLAIN, 12));
+        for (int i = 0; i < labels.length; i++) {
+            int cy = y + 5 + i * lineHeight + lineHeight / 2;
+            g2.setColor(colors[i]);
+            g2.fillOval(x + 8, cy - 6, 12, 12);
+            g2.setColor(Color.DARK_GRAY);
+            g2.drawString(labels[i], x + 28, cy + 4);
+        }
+    }
+
+    /** Which hospital pin (if any) is under the mouse? */
+    private Hospital hospitalAt(int mouseX, int mouseY) {
+        for (Hospital h : hospitals) {
+            int x = lonToX(h.getLocation().getLongitude());
+            int y = latToY(h.getLocation().getLatitude());
+            double distance = Math.hypot(mouseX - x, mouseY - y);
+            if (distance <= PIN_RADIUS + 3) {
+                return h;
+            }
+        }
+        return null;
+    }
+}
