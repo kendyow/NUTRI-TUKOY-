@@ -1,0 +1,130 @@
+package gui;
+
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.FlowLayout;
+import java.time.LocalDate;
+import java.time.Month;
+
+import javax.swing.JComboBox;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JTable;
+import javax.swing.border.EmptyBorder;
+import javax.swing.table.DefaultTableCellRenderer;
+import javax.swing.table.DefaultTableModel;
+
+import model.BloodType;
+import model.Hospital;
+import service.Registry;
+import service.StockForecast;
+
+/** Shows one hospital's blood stock with colored status and the shortage forecast. */
+public class StockPanel extends JPanel {
+    private final Registry registry;
+    private final JComboBox<Hospital> hospitalBox = new JComboBox<>();
+    private final DefaultTableModel tableModel = new DefaultTableModel(
+            new String[] {"Blood type", "Units", "Status", "Projected stock", "Forecast"}, 0) {
+        @Override
+        public boolean isCellEditable(int row, int column) {
+            return false;      // the table is for viewing only
+        }
+    };
+    private final JTable table = new JTable(tableModel);
+    private final JLabel summaryLabel = new JLabel(" ");
+
+    public StockPanel(Registry registry) {
+        this.registry = registry;
+        setLayout(new BorderLayout(0, 8));
+        setBorder(new EmptyBorder(12, 12, 12, 12));
+
+        for (Hospital h : registry.getHospitals()) {
+            hospitalBox.addItem(h);
+        }
+        JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        top.add(new JLabel("Hospital:"));
+        top.add(hospitalBox);
+        add(top, BorderLayout.NORTH);
+
+        table.setRowHeight(28);
+        table.getTableHeader().setReorderingAllowed(false);
+        StatusRenderer renderer = new StatusRenderer();
+        table.getColumnModel().getColumn(2).setCellRenderer(renderer);
+        table.getColumnModel().getColumn(4).setCellRenderer(renderer);
+
+        // Center the plain columns too
+        DefaultTableCellRenderer centered = new DefaultTableCellRenderer();
+        centered.setHorizontalAlignment(DefaultTableCellRenderer.CENTER);
+        table.getColumnModel().getColumn(0).setCellRenderer(centered);
+        table.getColumnModel().getColumn(1).setCellRenderer(centered);
+        table.getColumnModel().getColumn(3).setCellRenderer(centered);
+        add(new JScrollPane(table), BorderLayout.CENTER);
+
+        JPanel bottom = new JPanel(new BorderLayout(0, 6));
+        bottom.add(summaryLabel, BorderLayout.NORTH);
+        bottom.add(new JLabel("<html><i>OK: more than 10 units. LOW: 4 to 10. CRITICAL: 1 to 3. OUT: 0. "
+                + "Stock is changed by hospital staff in the console program.</i></html>"),
+                BorderLayout.CENTER);
+        add(bottom, BorderLayout.SOUTH);
+
+        hospitalBox.addActionListener(e -> refresh());
+        refresh();
+    }
+
+    /** Reloads the table for the hospital that is currently selected. */
+    public void refresh() {
+        Hospital h = (Hospital) hospitalBox.getSelectedItem();
+        tableModel.setRowCount(0);
+        if (h == null) {
+            summaryLabel.setText("No hospitals in the system.");
+            return;
+        }
+        Month month = LocalDate.now().getMonth();
+        StockForecast forecast = registry.getForecast();
+        for (BloodType t : BloodType.values()) {
+            double projected = forecast.projectedStock(h, t, month);
+            tableModel.addRow(new Object[] {
+                t.getLabel(),
+                h.getUnits(t),
+                h.getStatus(t).name(),
+                String.format("%.1f", projected),
+                forecast.isShortageRisk(h, t, month) ? "AT RISK" : "Stable"
+            });
+        }
+        summaryLabel.setText("Total units: " + h.getTotalUnits()
+                + "   |   Needs attention: " + h.getLowStockTypes()
+                + "   |   Forecast month: " + month);
+    }
+
+    /** Colors a cell according to its text (OK, LOW, CRITICAL, OUT, AT RISK, Stable). */
+    private static class StatusRenderer extends DefaultTableCellRenderer {
+        @Override
+        public Component getTableCellRendererComponent(JTable table, Object value,
+                boolean isSelected, boolean hasFocus, int row, int column) {
+            super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+            setHorizontalAlignment(CENTER);
+            setForeground(Color.BLACK);
+            switch (String.valueOf(value)) {
+                case "OK":
+                case "Stable":
+                    setBackground(new Color(200, 235, 205));
+                    break;
+                case "LOW":
+                case "AT RISK":
+                    setBackground(new Color(255, 225, 160));
+                    break;
+                case "CRITICAL":
+                    setBackground(new Color(255, 190, 180));
+                    break;
+                case "OUT":
+                    setBackground(new Color(230, 150, 150));
+                    break;
+                default:
+                    setBackground(Color.WHITE);
+            }
+            return this;
+        }
+    }
+}
