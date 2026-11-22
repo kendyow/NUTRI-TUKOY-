@@ -1,0 +1,44 @@
+package app;
+
+import javax.swing.JOptionPane;
+import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
+
+import exception.DugtongBuhayException;
+import gui.MainWindow;
+import service.DataStore;
+import service.Registry;
+import service.SampleData;
+
+/** Starts the graphical version. Uses the same data/ folder as the console version. */
+public class GuiMain {
+    public static void main(String[] args) {
+        Registry registry = new Registry();
+        DataStore store = new DataStore("data");
+
+        try {
+            if (store.hasSavedData()) {
+                store.load(registry);
+            } else {
+                SampleData.load(registry);
+                store.save(registry);
+            }
+        } catch (DugtongBuhayException e) {
+            JOptionPane.showMessageDialog(null,
+                    "Startup problem: " + e.getMessage()
+                    + "\n\nFix the file in the data/ folder, or delete the folder to start fresh.",
+                    "DUGTONG-BUHAY", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        // Swing windows must be created on the "event dispatch thread"
+        SwingUtilities.invokeLater(() -> {
+            try {
+                UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+            } catch (Exception ignored) {
+                // if the system look is not available, Java's default look is used
+            }
+            new MainWindow(registry, store).setVisible(true);
+        });
+    }
+}
